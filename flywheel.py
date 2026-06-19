@@ -14,7 +14,7 @@ import duckdb
 from pipeline import config
 from pipeline.traces import load_traces, traces_to_bronze, trace_summary
 from pipeline.dataset import (
-    build_eval_set, build_preference_pairs, decontaminate, write_jsonl,
+    build_eval_set, build_preference_pairs, decontaminate_vn_support_pairs, write_jsonl,
 )
 from pipeline.features import point_in_time_features, naive_leaky_features
 
@@ -30,7 +30,7 @@ def main() -> dict:
         # 2) Curate datasets from the traces.
         eval_set = build_eval_set(con)
         pairs = build_preference_pairs(con)
-        clean_pairs = decontaminate(pairs, eval_set)
+        clean_pairs = decontaminate_vn_support_pairs(pairs, eval_set)
         n_eval = write_jsonl(eval_set, config.EVAL_JSONL)
         n_pref = write_jsonl(clean_pairs, config.PREF_JSONL)
 

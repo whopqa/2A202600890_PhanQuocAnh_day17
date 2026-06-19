@@ -15,3 +15,6 @@ datasets/
 # stray student-simulation copies (never part of the lab)
 student-*/
 verify-*/
+.env*
+.user.yml
+dbt_project/.user.yml

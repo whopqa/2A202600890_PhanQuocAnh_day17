@@ -14,11 +14,30 @@ never train on what we grade on. Train/test leakage is the #1 way an eval lies.
 """
 from __future__ import annotations
 import json
+import unicodedata
 from pathlib import Path
 
 import duckdb
 
 from .traces import BRONZE_SPANS
+
+
+_VN_SUPPORT_HINTS = (
+    "don hang",
+    "đơn hàng",
+    "o dau",
+    "ở đâu",
+    "doi tra",
+    "đổi trả",
+    "hoan tien",
+    "hoàn tiền",
+    "giao hang",
+    "giao hàng",
+    "van don",
+    "vận đơn",
+    "ho tro",
+    "hỗ trợ",
+)
 
 
 def _norm(s: str) -> str:
@@ -83,6 +102,47 @@ def decontaminate(pairs: list[dict], eval_set: list[dict]) -> list[dict]:
     """
     held_out = {_norm(e["input"]) for e in eval_set}
     return [p for p in pairs if _norm(p["prompt"]) not in held_out]
+
+
+def _norm_vn_support_text(s: str) -> str:
+    """Heuristic normalization for Vietnamese e-commerce support prompts.
+
+    This keeps the bonus small and intentionally favors common support traffic:
+    accent-insensitive text, punctuation-insensitive order IDs, and collapsed
+    whitespace so rewritten variants still overlap.
+    """
+    text = (s or "").replace("đ", "d").replace("Đ", "D")
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.lower()
+    text = "".join(ch if ch.isalnum() else " " for ch in text)
+    return " ".join(text.split())
+
+
+def _looks_like_vn_support_text(s: str) -> bool:
+    raw = _norm(s)
+    fuzzy = _norm_vn_support_text(s)
+    return any(hint in raw or hint in fuzzy for hint in _VN_SUPPORT_HINTS)
+
+
+def decontaminate_vn_support_pairs(pairs: list[dict], eval_set: list[dict]) -> list[dict]:
+    """Use exact match by default, with conservative VN support fuzzy matching."""
+    held_out_exact = {_norm(e["input"]) for e in eval_set}
+    held_out_support = {
+        _norm_vn_support_text(e["input"])
+        for e in eval_set
+        if _looks_like_vn_support_text(e["input"])
+    }
+
+    clean = []
+    for pair in pairs:
+        prompt = pair["prompt"]
+        if _norm(prompt) in held_out_exact:
+            continue
+        if _looks_like_vn_support_text(prompt) and _norm_vn_support_text(prompt) in held_out_support:
+            continue
+        clean.append(pair)
+    return clean
 
 
 def write_jsonl(rows: list[dict], path: Path) -> int:

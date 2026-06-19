@@ -1,22 +1,9 @@
-# Reflection — Day 17 (≤ 200 words)
+# Reflection — Day 17
 
-Answer briefly, in your own words. This is graded on reasoning, not length.
+1. The most silent failure is decontamination. The repo still produces datasets, but the eval set stops being a real holdout. I would detect it by monitoring prompt overlap between `eval_golden.jsonl` and raw preference pairs; in this run, 3 raw pairs became 1 clean pair, so a sudden drop to 0 removals would be suspicious.
 
-1. **The flywheel.** Day 13 emitted agent traces; today you turned them into an
-   eval set and DPO pairs that Day 22 will train on. Which step in
-   `traces → Bronze → datasets` would break most silently in production if you
-   got it wrong — and how would you detect it?
+2. If I skip decontamination, I train on prompts the model is later graded on. That inflates offline metrics without improving generalization. The lie would look like strong results on the 2-row holdout, then weaker behavior on new customer-support phrasings.
 
-2. **Decontamination.** Your run dropped 2 of 3 preference pairs because their
-   prompts were in the eval set. What concretely goes wrong if you *skip* this
-   step and train on those pairs? How would the lie show up in your metrics?
+3. A dangerous feature is customer `lifetime_spend`. In the repo’s leak example, the `u100` event on `2026-06-01` should only see `50.0`, but the naive join leaks `300.0`. In a real e-commerce support system, refund count or VIP tier would be just as dangerous.
 
-3. **Point-in-time.** The naive join leaked a future `lifetime_spend` into the
-   training row. Describe one feature in a system you know that would be
-   dangerous to join without an `ASOF`/point-in-time guard.
-
-4. **Graph vs vector.** From `kg_demo.py`, name one question the knowledge graph
-   answers well that flat chunk retrieval (`embed.py`) would struggle with, and
-   one where the graph is overkill.
-
-_Write your answers below._
+4. The graph answers “Where does a widget ship from?” well because it needs the multihop path `widget -> accessory -> hanoi fulfillment center`. Flat chunk retrieval struggles when no single chunk contains both facts. The graph is overkill for a direct policy lookup like “How many days can I return a widget?”

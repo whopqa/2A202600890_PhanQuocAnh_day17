@@ -1,9 +1,16 @@
 """Tests for the agent-data flywheel + KG tracks (Thực Hành 1/3/4, §13). Zero-key."""
 import duckdb
+import pandas as pd
 import pytest
 
 from pipeline.traces import load_traces, flatten, traces_to_bronze, trace_summary, BRONZE_SPANS
-from pipeline.dataset import build_eval_set, build_preference_pairs, decontaminate
+from pipeline.dataset import (
+    _norm_vn_support_text,
+    build_eval_set,
+    build_preference_pairs,
+    decontaminate,
+    decontaminate_vn_support_pairs,
+)
 from pipeline.features import point_in_time_features, naive_leaky_features
 from pipeline.kg import extract_triples, build_graph, query, returnable_products
 from pipeline import config
@@ -59,6 +66,80 @@ def test_decontamination_removes_eval_leakage(con):
     assert len(clean) < len(pairs)               # at least one overlap dropped
     held = {e["input"].lower() for e in ev}
     assert all(p["prompt"].lower() not in held for p in clean)
+
+
+def test_vietnamese_decontamination_drops_rewritten_eval_overlap():
+    eval_set = [
+        {"trace_id": "t_eval", "input": "Đơn hàng #123 của tôi đang ở đâu?", "reference": "Đang giao"}
+    ]
+    pairs = [
+        {"prompt": "Don hang 123 cua toi dang o dau", "chosen": "Đơn đang giao", "rejected": "Không rõ"},
+        {"prompt": "Chính sách đổi trả cho widget là gì?", "chosen": "Đổi trả 30 ngày", "rejected": "Không hỗ trợ"},
+    ]
+
+    exact_clean = decontaminate(pairs, eval_set)
+    assert exact_clean == pairs
+
+    clean = decontaminate_vn_support_pairs(pairs, eval_set)
+    assert clean == [
+        {"prompt": "Chính sách đổi trả cho widget là gì?", "chosen": "Đổi trả 30 ngày", "rejected": "Không hỗ trợ"}
+    ]
+
+
+def test_vietnamese_decontamination_keeps_unrelated_non_latin_prompts():
+    eval_set = [
+        {"trace_id": "t_eval", "input": "客服 在 哪", "reference": "Ở trang hỗ trợ"}
+    ]
+    pairs = [
+        {"prompt": "退貨 政策", "chosen": "Đổi trả 30 ngày", "rejected": "Không hỗ trợ"}
+    ]
+
+    assert _norm_vn_support_text(eval_set[0]["input"]) != _norm_vn_support_text(pairs[0]["prompt"])
+    assert decontaminate_vn_support_pairs(pairs, eval_set) == pairs
+
+
+def test_vietnamese_decontamination_preserves_exact_match_for_non_support_prompts():
+    eval_set = [
+        {"trace_id": "t_eval", "input": "C#", "reference": "language"}
+    ]
+    pairs = [
+        {"prompt": "C++", "chosen": "language", "rejected": "unknown"}
+    ]
+
+    assert decontaminate(pairs, eval_set) == pairs
+    assert decontaminate_vn_support_pairs(pairs, eval_set) == pairs
+
+
+def test_flywheel_main_uses_vietnamese_aware_decontamination(monkeypatch):
+    import flywheel
+
+    eval_set = [
+        {"trace_id": "t_eval", "input": "Đơn hàng #123 của tôi đang ở đâu?", "reference": "Đang giao"}
+    ]
+    pairs = [
+        {"prompt": "Don hang 123 cua toi dang o dau", "chosen": "Đơn đang giao", "rejected": "Không rõ"}
+    ]
+
+    monkeypatch.setattr(flywheel, "load_traces", lambda: [])
+    monkeypatch.setattr(flywheel, "traces_to_bronze", lambda con, traces: 0)
+    monkeypatch.setattr(flywheel, "trace_summary", lambda con: pd.DataFrame([{"trace_id": "t1", "outcome": "ok"}]))
+    monkeypatch.setattr(flywheel, "build_eval_set", lambda con: eval_set)
+    monkeypatch.setattr(flywheel, "build_preference_pairs", lambda con: pairs)
+    monkeypatch.setattr(
+        flywheel,
+        "point_in_time_features",
+        lambda con: pd.DataFrame([{"user_id": "u1", "event_ts": "2024-01-01", "spend_at_event": 1}]),
+    )
+    monkeypatch.setattr(
+        flywheel,
+        "naive_leaky_features",
+        lambda con: pd.DataFrame([{"user_id": "u1", "event_ts": "2024-01-01", "spend_leaky": 1}]),
+    )
+    monkeypatch.setattr(flywheel, "write_jsonl", lambda rows, path: len(rows))
+
+    stats = flywheel.main()
+    assert stats["n_pairs_raw"] == 1
+    assert stats["n_pref"] == 0
 
 
 def test_point_in_time_join_beats_leaky(con):

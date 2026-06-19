@@ -9,7 +9,7 @@ from pipeline import config
 from pipeline.streaming import MiniTopic, consume_features
 from pipeline.embed import ingest_docs
 from pipeline.traces import load_traces, traces_to_bronze
-from pipeline.dataset import build_eval_set, build_preference_pairs, decontaminate
+from pipeline.dataset import build_eval_set, build_preference_pairs, decontaminate_vn_support_pairs
 from pipeline.features import point_in_time_features, naive_leaky_features
 from pipeline.kg import ingest_docs_to_graph, returnable_products, traverse, vector_foil
 import main
@@ -62,7 +62,7 @@ def run() -> bool:
     eval_set = build_eval_set(fcon)
     ok &= check("eval golden set curated from traces", len(eval_set) >= 1)
     pairs = build_preference_pairs(fcon)
-    clean = decontaminate(pairs, eval_set)
+    clean = decontaminate_vn_support_pairs(pairs, eval_set)
     ok &= check("decontamination drops eval-overlapping pairs", len(clean) < len(pairs))
     ok &= check("at least one clean preference pair survives", len(clean) >= 1)
     pit = point_in_time_features(fcon)
